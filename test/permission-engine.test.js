@@ -24,6 +24,7 @@ class El {
         this.disabled = !!attrs.disabled;
         this.onclick = attrs.onclick || null;
         this.shadowRoot = attrs.shadowRoot || null;
+        this.style = { cssText: '' };
         this.children = kids;
         this.parentElement = null;
         this._clicked = false;
@@ -53,6 +54,21 @@ class El {
         }
         return null;
     }
+    querySelectorAll(sel) {
+        const all = this._flat();
+        return all.filter(el => {
+            if (sel.includes('pre, code') || sel.includes('code') || sel.includes('pre')) {
+                return el.tagName === 'PRE' || el.tagName === 'CODE';
+            }
+            if (sel.includes('button[aria-label')) {
+                var aria = el.getAttribute('aria-label');
+                if (!aria) return false;
+                var matchStr = sel.match(/"([^"]+)"/)[1].toLowerCase();
+                return el.tagName === 'BUTTON' && aria.toLowerCase().includes(matchStr);
+            }
+            return false;
+        });
+    }
     _flat() {
         let r = [];
         for (const c of this.children) { r.push(c); r = r.concat(c._flat()); }
@@ -70,6 +86,18 @@ function makeDoc(bodyKids, isAgentPanel = true) {
             if (isAgentPanel && sel === '.react-app-container') return new El('DIV', '');
             if (isAgentPanel && sel.includes('agent')) return new El('DIV', '');
             return body.querySelector(sel);
+        },
+        querySelectorAll(sel) {
+            return body._flat().filter(el => {
+                if (sel.includes('button[aria-label')) {
+                    var aria = el.getAttribute('aria-label');
+                    if (!aria) return false;
+                    var matchStr = sel.match(/"([^"]+)"/)[1].toLowerCase();
+                    return el.tagName === 'BUTTON' && aria.toLowerCase().includes(matchStr);
+                }
+                if (sel.includes('code') || sel.includes('pre')) return el.tagName === sel.toUpperCase();
+                return false;
+            });
         },
         createTreeWalker(root) {
             const nodes = [];
@@ -95,7 +123,9 @@ function run(doc, custom = [], blocked = [], allowed = []) {
     const fn = new Function('document', 'NodeFilter', 'window', 'requestAnimationFrame', 'MutationObserver', 'return ' + script);
 
     // Mock window, requestAnimationFrame, and MutationObserver
-    const mockWindow = {};
+    const mockWindow = {
+        location: { href: 'http://localhost' }
+    };
 
     // If tests pre-set doc.defaultView properties (e.g. __AA_PAUSED), copy them
     if (doc.defaultView) {
@@ -310,12 +340,6 @@ test('data-testid on plain DIV is NOT clicked', () => {
 // ═════════════════════════════════════════════════════════════════════
 console.log('\n\x1b[1m--- Expand Banner (Pass 2) ---\x1b[0m');
 
-test('"Expand" clicked when no action buttons exist', () => {
-    const btn = new El('BUTTON', 'Expand');
-    run(makeDoc([btn]));
-    assert.ok(btn._clicked);
-});
-
 test('"Requires Input" banner clicked (startsWith match)', () => {
     const btn = new El('BUTTON', 'Requires Input');
     run(makeDoc([btn]));
@@ -328,9 +352,9 @@ test('"1 Step Requires Input" does NOT match (prefix mismatch)', () => {
     assert.ok(!btn._clicked);
 });
 
-test('action buttons beat expand', () => {
+test('action buttons beat explicit banners', () => {
     const run_btn = new El('BUTTON', 'Run');
-    const exp = new El('BUTTON', 'Expand');
+    const exp = new El('BUTTON', 'Requires Input');
     run(makeDoc([exp, run_btn]));
     assert.ok(run_btn._clicked);
     assert.ok(!exp._clicked);
@@ -483,6 +507,38 @@ test('word boundary: blocking "rm" does NOT block "yarn format"', () => {
     assert.ok(!btn3._clicked, '"rm -rf /" SHOULD be blocked by pattern "rm"');
 });
 
+test('word boundary: shell metacharacters act as delimiters', () => {
+    // Array of commands where 'rm' is bounded by shell metacharacters
+    const blockCases = [
+        'rm; ls',
+        'echo "rm"',
+        "echo 'rm'",
+        'rm|grep',
+        'ls&rm',
+        '(rm)',
+        '[rm]',
+        '{rm}',
+        '`rm`',
+        '$rm',
+        'rm=1',
+        '<rm',
+        '>rm',
+        'rm,',
+        '\\\\rm',
+        'rm:',
+        '/rm/',
+        'rm\\t-rf',
+        'rm\\nls',
+        'rm\\rls'
+    ];
+
+    for (const cmd of blockCases) {
+        const { doc, btn } = makeCommandDoc(cmd);
+        run(doc, [], ['rm'], []);
+        assert.ok(!btn._clicked, `"${cmd}" SHOULD be blocked by pattern "rm" (shell metacharacter boundary)`);
+    }
+});
+
 test('fail closed: Run button with no code block and filters active', () => {
     const btn = new El('BUTTON', 'Run');
     const result = run(makeDoc([btn]), [], ['rm -rf'], []);
@@ -531,7 +587,7 @@ console.log(`  \x1b[32m${pass} passed\x1b[0m, \x1b[${fail ? '31' : '32'}m${fail}
 
 if (fails.length) {
     console.log('\n  Failures:');
-    fails.forEach(f => console.log(`   • ${f}`));
+    fails.forEach(f => console.log(`   • ${f} `));
 }
 console.log('');
 process.exit(fail ? 1 : 0);

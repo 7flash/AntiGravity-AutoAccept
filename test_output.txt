@@ -1,0 +1,139 @@
+
+[1m--- Webview Guard ---[0m
+  [32m✓[0m non-agent-panel: observer installs but buttons are NOT clicked
+  [32m✓[0m allows agent panel (returns observer-installed when empty)
+
+[1m--- Button Text Matching ---[0m
+[AA] clicking: run | node: BUTTON | text: Run
+  [32m✓[0m "Run" → clicked:run
+[AA] clicking: run | node: BUTTON | text: run
+  [32m✓[0m "run" → clicked:run
+[AA] clicking: run | node: BUTTON | text: RUN
+  [32m✓[0m "RUN" → clicked:run
+[AA] clicking: run | node: BUTTON | text: Run Alt+d
+  [32m✓[0m "Run Alt+d" → clicked:run
+[AA] clicking: run | node: BUTTON | text: Run Command
+  [32m✓[0m "Run Command" → clicked:run
+[AA] clicking: accept | node: BUTTON | text: Accept
+  [32m✓[0m "Accept" → clicked:accept
+[AA] clicking: accept | node: BUTTON | text: accept
+  [32m✓[0m "accept" → clicked:accept
+[AA] clicking: accept | node: BUTTON | text: Accept All
+  [32m✓[0m "Accept All" → clicked:accept
+[AA] clicking: always allow | node: BUTTON | text: Always Allow
+  [32m✓[0m "Always Allow" → clicked:always allow
+[AA] clicking: always allow | node: BUTTON | text: always allow
+  [32m✓[0m "always allow" → clicked:always allow
+[AA] clicking: always allow | node: BUTTON | text: Always ALLOW
+  [32m✓[0m "Always ALLOW" → clicked:always allow
+[AA] clicking: allow this conversation | node: BUTTON | text: Allow this conversation
+  [32m✓[0m "Allow this conversation" → clicked:allow this conversation
+[AA] clicking: allow | node: BUTTON | text: Allow
+  [32m✓[0m "Allow" → clicked:allow
+[AA] clicking: allow | node: BUTTON | text: allow
+  [32m✓[0m "allow" → clicked:allow
+[AA] clicking: continue | node: BUTTON | text: Continue
+  [32m✓[0m "Continue" → clicked:continue
+[AA] clicking: continue | node: BUTTON | text: continue
+  [32m✓[0m "continue" → clicked:continue
+
+[1m--- Priority Order ---[0m
+[AA] clicking: run | node: BUTTON | text: Run
+  [32m✓[0m "Run" beats "Always Allow" when both present
+[AA] clicking: accept | node: BUTTON | text: Accept
+  [32m✓[0m "Accept" beats "Allow" when both present
+[AA] clicking: run | node: BUTTON | text: Run
+  [32m✓[0m "Run" beats "Accept" when both present
+[AA] clicking: always allow | node: BUTTON | text: Always Allow
+  [32m✓[0m "Always Allow" beats plain "Allow"
+
+[1m--- Reject / Ignore Cases ---[0m
+  [32m✓[0m skips text > 50 chars (container, not button)
+  [32m✓[0m skips disabled button
+  [32m✓[0m skips aria-disabled button
+  [32m✓[0m skips button with .loading class
+  [32m✓[0m skips button containing .codicon-loading spinner
+  [32m✓[0m skips plain DIV with "Run" (not a button)
+  [32m✓[0m does NOT match 2-char text via startsWith
+
+[1m--- Clickable Ancestor Traversal ---[0m
+[AA] clicking: run | node: BUTTON | text: Run
+  [32m✓[0m span inside <button> → clicks button
+[AA] clicking: accept | node: DIV | text: Accept
+  [32m✓[0m span inside role="button" div → clicks div
+[AA] clicking: allow | node: DIV | text: Allow
+  [32m✓[0m span inside cursor-pointer div → clicks div
+[AA] clicking: run | node: DIV | text: Run
+  [32m✓[0m span inside tabindex="0" div → clicks div
+
+[1m--- data-testid / data-action Shortcut ---[0m
+[AA] clicking: allow | node: BUTTON | text: Whatever
+  [32m✓[0m data-testid="alwaysallow" on <button> matches
+[AA] clicking: allow | node: BUTTON | text: Some Label
+  [32m✓[0m data-action="always-allow" on <button> matches
+  [32m✓[0m data-testid on plain DIV is NOT clicked
+
+[1m--- Expand Banner (Pass 2) ---[0m
+  [31m✗[0m "Expand" clicked when no action buttons exist
+    The expression evaluated to a falsy value:
+
+  assert.ok(btn._clicked)
+
+[AA] clicking: requires input | node: BUTTON | text: Requires Input
+  [32m✓[0m "Requires Input" banner clicked (startsWith match)
+  [32m✓[0m "1 Step Requires Input" does NOT match (prefix mismatch)
+[AA] clicking: run | node: BUTTON | text: Run
+  [32m✓[0m action buttons beat expand
+
+[1m--- Custom Button Texts ---[0m
+[AA] clicking: toujours autoriser | node: BUTTON | text: toujours autoriser
+  [32m✓[0m custom "toujours autoriser" matches
+[AA] clicking: run | node: BUTTON | text: Run
+  [32m✓[0m built-in "Run" still beats custom text
+
+[1m--- Edge Cases ---[0m
+  [32m✓[0m empty DOM → observer-installed (no buttons to click)
+[AA] clicking: run | node: BUTTON | text: Run
+  [32m✓[0m whitespace "  Run  " still matches
+[AA] clicking: run | node: BUTTON | text: ⚡Run
+  [32m✓[0m icon + text child: <button><span>⚡</span><span>Run</span></button>
+
+[1m--- Continue Button ---[0m
+[AA] clicking: continue | node: BUTTON | text: Continue
+  [32m✓[0m "Continue" is auto-clicked (invocation limit)
+[AA] clicking: continue | node: BUTTON | text: Continue generation
+  [32m✓[0m "Continue generation" matches via startsWith
+
+[1m--- MutationObserver ---[0m
+  [32m✓[0m returns observer-installed on agent panel
+  [32m✓[0m idempotent: second injection returns already-active
+
+[1m--- Command Filtering ---[0m
+  [32m✓[0m blocklist blocks "rm -rf" command
+[AA] clicking: run | node: BUTTON | text: Run
+  [32m✓[0m blocklist allows safe command
+[AA] clicking: run | node: BUTTON | text: Run
+  [32m✓[0m allowlist: only allows whitelisted commands
+  [32m✓[0m blocklist takes priority over allowlist
+[AA] clicking: run | node: BUTTON | text: Run
+  [32m✓[0m no filtering when both lists empty
+  [31m✗[0m non-terminal buttons (accept/allow) unaffected by filters
+    Accept button should ignore command filters
+[AA] clicking: run | node: BUTTON | text: Run
+[AA] clicking: run | node: BUTTON | text: Run
+  [32m✓[0m word boundary: blocking "rm" does NOT block "yarn format"
+  [32m✓[0m fail closed: Run button with no code block and filters active
+[AA] clicking: run | node: BUTTON | text: Run
+  [32m✓[0m re-injection initializes __AA_PAUSED to false
+[AA] clicking: run | node: BUTTON | text: Run
+  [32m✓[0m observer is exposed on window.__AA_OBSERVER
+[AA] clicking: run | node: BUTTON | text: Run
+  [32m✓[0m __AA_PAUSED=true blocks scanAndClick (integration)
+
+══════════════════════════════════════════════════
+  [32m58 passed[0m, [31m2 failed[0m, 60 total
+
+  Failures:
+   • "Expand" clicked when no action buttons exist
+   • non-terminal buttons (accept/allow) unaffected by filters
+

@@ -15,3 +15,8 @@ temp_vsix
 vsix_check
 temp_extract
 *.zip
+.docs/
+cdp_targets.txt
+test/probe*
+test/*_output.txt
+test/deep_probe*

@@ -18,6 +18,7 @@ class DashboardProvider {
         this._getStatus = getStatus;
         this._panel = null;
         this._disposables = [];
+        this.activityLog = [];
     }
 
     /**
@@ -99,10 +100,14 @@ class DashboardProvider {
      * Push a log entry to the activity feed
      */
     pushActivity(message, type = 'info') {
+        const time = new Date();
+        this.activityLog.push({ timestamp: time.toISOString(), type, message });
+        if (this.activityLog.length > 500) this.activityLog.shift();
+
         if (!this._panel) return;
         this._panel.webview.postMessage({
             type: 'activity',
-            data: { message, type, timestamp: new Date().toLocaleTimeString() }
+            data: { message, type, timestamp: time.toLocaleTimeString() }
         });
     }
 
@@ -188,6 +193,18 @@ class DashboardProvider {
                 clicks.push(now);
                 this._context.globalState.update('autoAcceptSponsorClicks', clicks);
                 vscode.env.openExternal(vscode.Uri.parse('https://github.com/yazanbaker94/AntiGravity-AutoAccept'));
+                break;
+            }
+            case 'exportLogs': {
+                const data = JSON.stringify(this.activityLog, null, 2);
+                const uri = await vscode.window.showSaveDialog({
+                    defaultUri: vscode.Uri.file(`autoaccept-logs-${Date.now()}.json`),
+                    filters: { 'JSON': ['json'] }
+                });
+                if (uri) {
+                    await vscode.workspace.fs.writeFile(uri, Buffer.from(data, 'utf8'));
+                    vscode.window.showInformationMessage('Logs exported successfully');
+                }
                 break;
             }
         }
@@ -321,6 +338,19 @@ class DashboardProvider {
     .activity-entry .time { opacity: 0.5; }
     .activity-entry.blocked { color: var(--danger); }
     .activity-entry.click { color: var(--success); }
+    .activity-entry.skip { color: var(--warning); opacity: 0.8; }
+    .activity-entry.auto-continue { color: #9b59b6; font-weight: 600; }
+    
+    /* Log Filters */
+    .log-filters { display: flex; gap: 4px; }
+    .log-filter { background: var(--badge-bg); border: 1px solid var(--border); color: var(--fg); padding: 2px 8px; border-radius: 4px; font-size: 11px; cursor: pointer; opacity: 0.6; transition: 0.2s; }
+    .log-filter:hover { opacity: 0.8; }
+    .log-filter.active { opacity: 1; background: var(--accent); border-color: var(--accent); color: white; }
+    
+    .activity-log[data-current-filter="click"] .activity-entry:not(.click):not(.auto-continue) { display: none !important; }
+    .activity-log[data-current-filter="skip"] .activity-entry:not(.skip) { display: none !important; }
+    .activity-log[data-current-filter="blocked"] .activity-entry:not(.blocked) { display: none !important; }
+
     #sponsor-slot { cursor: pointer; transition: border-color 0.2s ease, background-color 0.2s ease, transform 0.2s ease; }
     body #sponsor-slot:hover, body #sponsor-slot:focus-visible { background: var(--vscode-textBlockQuote-background, rgba(255,255,255,0.06)); border-color: var(--vscode-focusBorder, var(--vscode-textLink-foreground)); transform: translateY(-1px); outline: none; }
     body #sponsor-slot:active { transform: translateY(0); }
@@ -439,8 +469,19 @@ class DashboardProvider {
 
     <!-- Activity Log (Diagnostics at absolute bottom) -->
     <div class="card">
-        <div class="card-title">&#128203; Activity Log</div>
-        <div class="activity-log" id="activity-log">
+        <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
+            <span>&#128203; Activity Log</span>
+            <div style="display:flex; gap:8px; align-items:center;">
+                <div class="log-filters" id="log-filters">
+                    <button class="log-filter active" data-filter="all">All</button>
+                    <button class="log-filter" data-filter="click">Clicks</button>
+                    <button class="log-filter" data-filter="skip">Skips</button>
+                    <button class="log-filter" data-filter="blocked">Blocked</button>
+                </div>
+                <button onclick="vscode.postMessage({ type: 'exportLogs' })" style="background:var(--badge-bg);border:1px solid var(--border);color:var(--fg);padding:2px 8px;border-radius:4px;font-size:11px;cursor:pointer;opacity:0.8;transition:0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.8" title="Export Logs to JSON">⬇️ Export</button>
+            </div>
+        </div>
+        <div class="activity-log" id="activity-log" data-current-filter="all">
             <div class="empty-note">Waiting for activity...</div>
         </div>
     </div>
@@ -535,7 +576,10 @@ class DashboardProvider {
         const log = document.getElementById('activity-log');
         if (activityCount === 0) log.innerHTML = '';
         activityCount++;
-        const cls = data.type === 'blocked' ? 'blocked' : data.type === 'click' ? 'click' : '';
+        const cls = data.type === 'blocked' ? 'blocked' : 
+                    data.type === 'click' ? 'click' : 
+                    data.type === 'skip' ? 'skip' :
+                    data.type === 'auto-continue' ? 'auto-continue' : '';
         const entry = document.createElement('div');
         entry.className = 'activity-entry ' + cls;
         entry.innerHTML = '<span class="time">' + data.timestamp + '</span> ' + escHtml(data.message);
@@ -564,6 +608,15 @@ class DashboardProvider {
             if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openSponsor(); }
         });
     })();
+
+    // Activity Log Filters
+    document.querySelectorAll('.log-filter').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            document.querySelectorAll('.log-filter').forEach(b => b.classList.remove('active'));
+            e.target.classList.add('active');
+            document.getElementById('activity-log').setAttribute('data-current-filter', e.target.getAttribute('data-filter'));
+        });
+    });
 
     // Analytics rendering
     function formatTime(mins) {

@@ -2,7 +2,7 @@
     "name": "antigravity-autoaccept",
     "displayName": "AntiGravity AutoAccept",
     "description": "Auto-accept Run, Accept, and Always Allow buttons in Antigravity via CDP with Webview Guard isolation.",
-    "version": "3.8.0",
+    "version": "4.0.0",
     "publisher": "YazanBaker",
     "icon": "images/icon.png",
     "engines": {
@@ -26,6 +26,13 @@
                 "title": "Auto Accept V2: Open Dashboard"
             }
         ],
+        "keybindings": [
+            {
+                "command": "autoAcceptV2.toggle",
+                "key": "ctrl+shift+a",
+                "mac": "cmd+shift+a"
+            }
+        ],
         "configuration": {
             "title": "Auto Accept V2",
             "properties": {
@@ -42,7 +49,7 @@
                         "type": "string"
                     },
                     "scope": "application",
-                    "description": "Extra button texts to auto-click (for i18n or custom UI). E.g. ['toujours autoriser', 'siempre permitir']"
+                    "description": "Extra button texts to auto-click. Supports exact strings or Regex patterns enclosed in forward slashes. E.g. ['toujours autoriser', '/^deploy.*$/']"
                 },
                 "autoAcceptV2.cdpPort": {
                     "type": "number",
@@ -73,13 +80,27 @@
                     },
                     "scope": "application",
                     "description": "If non-empty, ONLY auto-run terminal commands matching these patterns. Blocklist takes priority over allowlist."
+                },
+                "autoAcceptV2.autoContinuePhrase": {
+                    "type": "string",
+                    "default": "whats next",
+                    "scope": "window",
+                    "description": "Phrase to auto-type when the AI is idle and input is empty. Set to empty string to disable auto-continue."
+                },
+                "autoAcceptV2.autoContinueCooldown": {
+                    "type": "number",
+                    "default": 30,
+                    "minimum": 5,
+                    "maximum": 120,
+                    "scope": "window",
+                    "description": "Minimum seconds between auto-continue prompts (5-120)."
                 }
             }
         }
     },
     "scripts": {
         "package": "npx -y @vscode/vsce package",
-        "test": "echo \"Error: no test specified\" && exit 1"
+        "test": "node test/dom-observer.test.js && node test/connection-manager.test.js && node test/telemetry.test.js && node test/permission-engine.test.js"
     },
     "repository": {
         "type": "git",

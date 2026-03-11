@@ -472,6 +472,88 @@ console.log('\n\x1b[1m--- Injection Flow (_handleNewTarget) ---\x1b[0m');
     });
 
     // ═════════════════════════════════════════════════════════════════════
+    console.log('\n\x1b[1m--- Hot-Reload: reinjectAll & pushFilterUpdate ---\x1b[0m');
+
+    await testAsync('reinjectAll calls cleanup + re-inject on all sessions', async () => {
+        const evals = [];
+        const { cm } = createMockCM({
+            evaluateHandler(expr) {
+                evals.push(expr);
+                if (expr.includes('__AA_CLEANUP')) return { result: { value: 'reset' } };
+                if (expr.includes('typeof document')) return { result: { value: 'has-dom' } };
+                if (expr.includes('typeof window')) return { result: { value: true } };
+                return { result: { value: 'observer-installed' } };
+            }
+        });
+        cm.ws = { readyState: 1 }; // Fake open WS
+        cm.sessions.set('t1', 's1');
+        cm.sessions.set('t2', 's2');
+        cm.reinjectAll();
+        // Give promises time to resolve
+        await new Promise(r => setTimeout(r, 50));
+        // Should have cleanup calls for both sessions
+        const cleanupCalls = evals.filter(e => e.includes('__AA_CLEANUP'));
+        assert.ok(cleanupCalls.length >= 2, `Expected >=2 cleanup calls, got ${cleanupCalls.length}`);
+    });
+
+    test('autoContinuePhrase is mutable for hot-reload', () => {
+        const { cm } = createMockCM();
+        eq(cm.autoContinuePhrase, 'whats next');
+        cm.autoContinuePhrase = 'proceed';
+        eq(cm.autoContinuePhrase, 'proceed');
+    });
+
+    test('autoContinueCooldown is mutable for hot-reload', () => {
+        const { cm } = createMockCM();
+        eq(cm.autoContinueCooldown, 30);
+        cm.autoContinueCooldown = 60;
+        eq(cm.autoContinueCooldown, 60);
+    });
+
+    await testAsync('pushFilterUpdate broadcasts to all sessions', async () => {
+        const evals = [];
+        const { cm } = createMockCM({
+            evaluateHandler(expr) {
+                evals.push(expr);
+                return { result: { value: 'filters-updated' } };
+            }
+        });
+        cm.ws = { readyState: 1 };
+        cm.sessions.set('t1', 's1');
+        cm.sessions.set('t2', 's2');
+        await cm.pushFilterUpdate(['rm'], ['npm test']);
+        const filterCalls = evals.filter(e => e.includes('__AA_BLOCKED'));
+        assert.ok(filterCalls.length >= 2, `Expected >=2 filter pushes, got ${filterCalls.length}`);
+        // Verify the filter values are embedded
+        assert.ok(filterCalls[0].includes('"rm"'), 'should contain blocked command');
+        assert.ok(filterCalls[0].includes('"npm test"'), 'should contain allowed command');
+    });
+
+    test('setCommandFilters persists values', () => {
+        const { cm } = createMockCM();
+        cm.setCommandFilters(['rm -rf'], ['npm test']);
+        assert.deepStrictEqual(cm.blockedCommands, ['rm -rf']);
+        assert.deepStrictEqual(cm.allowedCommands, ['npm test']);
+    });
+
+    test('reinjectAll is no-op when no sessions', () => {
+        const { cm } = createMockCM();
+        cm.ws = { readyState: 1 };
+        // Should not throw
+        cm.reinjectAll();
+        assert.ok(true, 'should complete without error');
+    });
+
+    await testAsync('pushFilterUpdate is no-op without WS', async () => {
+        const { cm } = createMockCM();
+        cm.ws = null;
+        cm.sessions.set('t1', 's1');
+        // Should not throw
+        await cm.pushFilterUpdate(['rm'], []);
+        assert.ok(true, 'should complete without error');
+    });
+
+    // ═════════════════════════════════════════════════════════════════════
     console.log(`\n${'═'.repeat(50)}`);
     console.log(`  \x1b[32m${pass} passed\x1b[0m, \x1b[${fail ? '31' : '32'}m${fail} failed\x1b[0m, ${pass + fail} total`);
     if (fails.length) {

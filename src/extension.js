@@ -57,6 +57,9 @@ function refreshConfig() {
     const newBlocked = config.get('blockedCommands', []);
     const newAllowed = config.get('allowedCommands', []);
     const newHasFilters = newBlocked.length > 0 || newAllowed.length > 0;
+    const newContinuePhrase = config.get('autoContinuePhrase', 'whats next');
+    const newContinueCooldown = config.get('autoContinueCooldown', 30);
+    const newContinueMatch = config.get('autoContinueMatch', []);
 
     // Log only on transitions
     if (newHasFilters !== cachedHasFilters) {
@@ -69,16 +72,32 @@ function refreshConfig() {
     cachedBlockedCommands = newBlocked;
     cachedAllowedCommands = newAllowed;
     cachedHasFilters = newHasFilters;
-    log(`[Config] hasFilters=${cachedHasFilters}, blocked=[${newBlocked.join(',')}], fileEdits=${newFileEdits}`);
+    log(`[Config] hasFilters=${cachedHasFilters}, blocked=[${newBlocked.join(',')}], fileEdits=${newFileEdits}, autoContinue="${newContinuePhrase}" (${newContinueCooldown}s), Match Sequences: ${newContinueMatch.length}`);
 
     // Hot-reload: push updated config to live CDP sessions
     if (connectionManager) {
         connectionManager.setCommandFilters(newBlocked, newAllowed);
         connectionManager.pushFilterUpdate(newBlocked, newAllowed);
 
-        // Re-inject observers when file edit setting changes (button list is baked at inject time)
+        // Re-inject observers when settings that are baked at inject time change
+        let needReinject = false;
         if (connectionManager.autoAcceptFileEdits !== newFileEdits) {
             connectionManager.autoAcceptFileEdits = newFileEdits;
+            needReinject = true;
+        }
+        if (connectionManager.autoContinuePhrase !== newContinuePhrase) {
+            connectionManager.autoContinuePhrase = newContinuePhrase;
+            needReinject = true;
+        }
+        if (connectionManager.autoContinueCooldown !== newContinueCooldown) {
+            connectionManager.autoContinueCooldown = newContinueCooldown;
+            needReinject = true;
+        }
+        if (JSON.stringify(connectionManager.autoContinueMatch) !== JSON.stringify(newContinueMatch)) {
+            connectionManager.autoContinueMatch = newContinueMatch;
+            needReinject = true;
+        }
+        if (needReinject) {
             connectionManager.reinjectAll();
         }
     }
@@ -118,8 +137,12 @@ function log(msg) {
     }
     // Push to dashboard activity log
     if (dashboardProvider) {
-        const type = msg.includes('blocked') || msg.includes('BLOCK') ? 'blocked'
-            : msg.includes('clicked') || msg.includes('CLICK') ? 'click' : 'info';
+        let type = 'info';
+        if (msg.includes('blocked') || msg.includes('BLOCK')) type = 'blocked';
+        else if (msg.includes('clicked') || msg.includes('CLICK')) type = 'click';
+        else if (msg.includes('SKIP')) type = 'skip';
+        else if (msg.includes('auto-continue')) type = 'auto-continue';
+
         dashboardProvider.pushActivity(msg, type);
     }
 }

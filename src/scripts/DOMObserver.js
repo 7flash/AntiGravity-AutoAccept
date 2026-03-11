@@ -9,12 +9,17 @@
  * @param {string[]} blockedCommands - Command patterns to never auto-run
  * @param {string[]} allowedCommands - If non-empty, only auto-run matching patterns
  * @param {boolean} [autoAcceptFileEdits=true] - Whether to auto-accept file edit buttons
+ * @param {string} [autoContinuePhrase='whats next'] - Phrase to type for auto-continue
+ * @param {number} [autoContinueCooldown=30] - Seconds between auto-continue prompts
  * @returns {string} JavaScript source to evaluate via CDP Runtime.evaluate
  */
-function buildDOMObserverScript(customTexts, blockedCommands, allowedCommands, autoAcceptFileEdits) {
+function buildDOMObserverScript(customTexts, blockedCommands, allowedCommands, autoAcceptFileEdits, autoContinuePhrase, autoContinueCooldown, autoContinueMatch) {
     blockedCommands = blockedCommands || [];
     allowedCommands = allowedCommands || [];
     if (autoAcceptFileEdits === undefined) autoAcceptFileEdits = true;
+    if (autoContinuePhrase === undefined) autoContinuePhrase = 'whats next';
+    if (autoContinueCooldown === undefined) autoContinueCooldown = 30;
+    autoContinueCooldown = Math.max(5, Math.min(120, autoContinueCooldown));
 
     const allTexts = [
         'run',  // Primary action button
@@ -23,7 +28,7 @@ function buildDOMObserverScript(customTexts, blockedCommands, allowedCommands, a
         'retry', 'continue',
         ...customTexts
     ];
-    const expandTexts = ['expand', 'requires input'];
+    const expandTexts = ['requires input'];
 
     return `
 (function() {
@@ -49,6 +54,9 @@ function buildDOMObserverScript(customTexts, blockedCommands, allowedCommands, a
     var BLOCKED_COMMANDS = ${JSON.stringify(blockedCommands)};
     var ALLOWED_COMMANDS = ${JSON.stringify(allowedCommands)};
     var HAS_FILTERS = BLOCKED_COMMANDS.length > 0 || ALLOWED_COMMANDS.length > 0;
+    var AUTO_CONTINUE_PHRASE = ${JSON.stringify(autoContinuePhrase)};
+    var AUTO_CONTINUE_COOLDOWN_MS = ${autoContinueCooldown * 1000};
+    var AUTO_CONTINUE_MATCH = ${JSON.stringify(autoContinueMatch || [])};
 
     // ═══ IDEMPOTENT TEARDOWN ═══
     // Clean up any previous state (observer, intervals) to prevent leaks on re-injection.
@@ -191,6 +199,13 @@ function buildDOMObserverScript(customTexts, blockedCommands, allowedCommands, a
                 var isMatch;
                 if (isExpandKeyword) {
                     isMatch = nodeText === text;
+                } else if (text.length > 2 && text.charAt(0) === '/' && text.charAt(text.length - 1) === '/') {
+                    try {
+                        var regex = new RegExp(text.substring(1, text.length - 1), 'i');
+                        isMatch = regex.test(nodeText);
+                    } catch (e) {
+                        isMatch = false;
+                    }
                 } else {
                     isMatch = nodeText === text ||
                         (text.length >= 5 && nodeText.startsWith(text) && isWordBoundary(nodeText, text.length) && nodeText.length <= text.length * 3) ||
@@ -209,6 +224,26 @@ function buildDOMObserverScript(customTexts, blockedCommands, allowedCommands, a
                     clickable.getAttribute('role') === 'button' || clickable.getAttribute('role') === 'link' ||
                     clickable.classList.contains('cursor-pointer') ||
                     clickable.onclick || clickable.getAttribute('tabindex') === '0') {
+
+                    // ═══ EXPAND/COLLAPSE GUARD ═══
+                    // Skip if closestClickable resolved to an expand/collapse toggle.
+                    // This happens when keyword text (e.g. "run") appears inside a collapsed
+                    // section — the walker matches the text but walks up to the toggle button.
+                    var btnText = (clickable.textContent || '').trim().toLowerCase();
+                    var ariaExpanded = clickable.getAttribute('aria-expanded');
+                    var isExpandToggle = /^(expand|collapse|show more|show less|show all|hide|toggle)/i.test(btnText) ||
+                        btnText === 'expand' || btnText === 'collapse' ||
+                        (ariaExpanded !== null && clickable !== wNode) ||
+                        clickable.classList.contains('expand') || clickable.classList.contains('collapse') ||
+                        clickable.classList.contains('toggle') ||
+                        (clickable.getAttribute('data-action') || '').toLowerCase().includes('expand') ||
+                        (clickable.getAttribute('data-action') || '').toLowerCase().includes('collapse');
+                    if (isExpandToggle && !isExpandType) {
+                        if (!window.__AA_DIAG) window.__AA_DIAG = [];
+                        window.__AA_DIAG.push({ action: 'SKIP_EXPAND_TOGGLE', matched: text, btnText: btnText.substring(0, 40) });
+                        continue;
+                    }
+
                     // Idempotency guard: skip disabled/loading buttons
                     if (clickable.disabled || clickable.getAttribute('aria-disabled') === 'true' ||
                         clickable.classList.contains('loading') || clickable.querySelector('.codicon-loading') ||
@@ -371,35 +406,144 @@ function buildDOMObserverScript(customTexts, blockedCommands, allowedCommands, a
             var MAX_SCANS = 5;
             for (var scan = 0; scan < MAX_SCANS; scan++) {
                 var match = findButton(document.body, allTexts);
-                if (!match) return null;
+                if (!match) {
+                    // ═══ Auto-continue: type phrase and press send ═══
+                    // Simple logic: send button exists (= AI idle) + input empty → type and send
+                    if (!AUTO_CONTINUE_PHRASE) return null;
+
+                    // Cooldown: don't spam auto-continue
+                    var now = Date.now();
+                    if (window.__AA_LAST_CONTINUE && (now - window.__AA_LAST_CONTINUE < AUTO_CONTINUE_COOLDOWN_MS)) return null;
+
+                    // 1. Find the SEND button — its presence means AI is idle
+                    //    During generation, only the stop button is visible (send is hidden/absent)
+                    var sendBtn = document.querySelector('button[data-tooltip-id="input-send-button-send-tooltip"]');
+                    if (!sendBtn) {
+                        // Fallback: look for any send-like button
+                        var cands = document.querySelectorAll('button[aria-label*="send" i], button[aria-label*="Send" i]');
+                        for (var si = 0; si < cands.length; si++) {
+                            if (!cands[si].disabled) { sendBtn = cands[si]; break; }
+                        }
+                    }
+                    if (!sendBtn) return null; // AI is still generating or no send button
+
+                    // 2. Find the input textbox — must be EMPTY (don't overwrite user drafts)
+                    var input = document.querySelector('div[contenteditable="true"][role="textbox"]');
+                    if (!input || (input.textContent || '').trim()) return null;
+
+                    // 3. Anti-loop: Circuit Breaker
+                    //    First short response (<200 chars) is allowed (might be a valid short answer).
+                    //    Second consecutive short response trips the breaker and stops auto-continue.
+                    //    If AUTO_CONTINUE_MATCH is configued, strictly require last response to end with matching sequence.
+                    var assistantMsgs = document.querySelectorAll('[data-role="assistant"]');
+                    if (assistantMsgs.length > 0) {
+                        var lastAssistant = assistantMsgs[assistantMsgs.length - 1];
+                        var responseText = lastAssistant.textContent || '';
+                        var responseLen = responseText.trim().length;
+
+                        if (AUTO_CONTINUE_MATCH && AUTO_CONTINUE_MATCH.length > 0) {
+                            var matchedSeq = false;
+                            for (var mi = 0; mi < AUTO_CONTINUE_MATCH.length; mi++) {
+                                // Match at end of text, ignoring trailing whitespace.
+                                if (responseText.trim().endsWith(AUTO_CONTINUE_MATCH[mi])) {
+                                    matchedSeq = true; break;
+                                }
+                            }
+                            // Strict requirement: if configured, we ONLY auto-continue on exact sequence match.
+                            if (!matchedSeq) return null;
+                        }
+
+                        if (window.__AA_LAST_ASSISTANT_TEXT !== responseText) {
+                            window.__AA_LAST_ASSISTANT_TEXT = responseText;
+                            if (responseLen < 200) {
+                                window.__AA_SHORT_RESPONSES = (window.__AA_SHORT_RESPONSES || 0) + 1;
+                            } else {
+                                window.__AA_SHORT_RESPONSES = 0;
+                            }
+                            window.__AA_CB_LOGGED = false; // Reset log flag for new message
+                        }
+
+                        if (window.__AA_SHORT_RESPONSES >= 2) {
+                            if (!window.__AA_CB_LOGGED) {
+                                if (!window.__AA_DIAG) window.__AA_DIAG = [];
+                                window.__AA_DIAG.push({ action: 'SKIP_SHORT_RESPONSE', matched: 'auto-continue', len: responseLen });
+                                _log('auto-continue: circuit breaker tripped — 2+ consecutive short AI responses.');
+                                window.__AA_CB_LOGGED = true;
+                            }
+                            return null;
+                        }
+                    }
+
+                    // 4. Type the phrase and click send
+                    window.__AA_LAST_CONTINUE = now;
+                    input.focus();
+                    document.execCommand('selectAll', false);
+                    document.execCommand('insertText', false, AUTO_CONTINUE_PHRASE);
+                    // Dispatch synthetic events to force React/Vue state updates immediately
+                    input.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+
+                    if (!window.__AA_DIAG) window.__AA_DIAG = [];
+                    window.__AA_DIAG.push({ action: 'AUTO_CONTINUE', matched: 'auto-continue', text: AUTO_CONTINUE_PHRASE });
+                    _log('auto-continue: typed "' + AUTO_CONTINUE_PHRASE + '"');
+
+                    // Poll for React to process the input and enable the send button
+                    var attempts = 0;
+                    var clickTimer = setInterval(function() {
+                        attempts++;
+                        var btn = document.querySelector('button[data-tooltip-id="input-send-button-send-tooltip"]');
+                        if (!btn) {
+                            var c2 = document.querySelectorAll('button[aria-label*="send" i]');
+                            for (var j = 0; j < c2.length; j++) {
+                                if (!c2[j].disabled) { btn = c2[j]; break; }
+                            }
+                        }
+                        if (btn && !btn.disabled) {
+                            clearInterval(clickTimer);
+                            btn.click();
+                            _log('auto-continue: clicked send on attempt ' + attempts);
+                        } else if (attempts >= 10) {
+                            clearInterval(clickTimer);
+                            _log('auto-continue: send not clickable after 10 attempts');
+                        }
+                    }, 100);
+
+                    return 'auto-continue';
+                }
 
                 var btn = match.node;
                 var matchedText = match.matchedText;
 
-            // Command filtering: applies to command-execution buttons near code blocks.
-            // Skip expand/preview buttons — they're UI chrome that toggles collapsed
-            // content, not terminal command executors. Filtering them causes false
-            // positives when nearby chat text contains blocked words (e.g., discussing
-            // "echo" in conversation), which cascades to hide the actual Run button.
             var isExpandBtn = (matchedText === 'expand' || matchedText === 'requires input');
+            var isTerminalBtn = TERMINAL_BUTTON_TEXTS.indexOf(matchedText) !== -1;
+            
             if (currentHasFilters && !isExpandBtn) {
                 var cmdText = extractCommandText(btn);
-                if (cmdText !== null) {
-                    // Terminal command detected — apply blocklist/allowlist filter
-                    if (!isCommandAllowed(cmdText)) {
-                        // Stamp the DOM element itself — shared across all JS contexts.
-                        // JS-variable cooldowns are isolated per CDP session scope,
-                        // but data attributes live on the DOM and are visible to all observers.
-                        btn.setAttribute('data-aa-blocked', 'true');
-                        // Visual block indicator — immediate UX feedback
-                        btn.style.cssText += ';background:#4a1c1c !important;opacity:0.6;cursor:not-allowed;';
-                        btn.textContent = '🚫 Blocked by Filter';
-                        var blockKey = _domPath(btn) + ':' + (btn.textContent || '').trim().toLowerCase().substring(0, 30);
-                        clickCooldowns[blockKey] = Date.now() + (15000 - COOLDOWN_MS);
-                        if (!window.__AA_DIAG) window.__AA_DIAG = [];
-                        window.__AA_DIAG.push({ action: 'BLOCKED', time: Date.now(), matched: matchedText, cmd: (cmdText || '').substring(0, 60) });
-                        continue; // Re-scan to find next button
+                
+                // If it's a terminal button (like 'Run') but we couldn't find the code block,
+                // fail closed to prevent executing hidden malicious commands.
+                // If it's a non-terminal button (like 'Accept'/'Allow'), we allow it without a code block.
+                var shouldBlock = false;
+                if (isTerminalBtn) {
+                    if (cmdText === null) {
+                        shouldBlock = true; // Fail closed
+                    } else {
+                        shouldBlock = !isCommandAllowed(cmdText);
                     }
+                }
+
+                if (shouldBlock) {
+                    // Stamp the DOM element itself — shared across all JS contexts.
+                    // JS-variable cooldowns are isolated per CDP session scope,
+                    // but data attributes live on the DOM and are visible to all observers.
+                    btn.setAttribute('data-aa-blocked', 'true');
+                    // Visual block indicator — immediate UX feedback
+                    if (btn.style) btn.style.cssText += ';background:#4a1c1c !important;opacity:0.6;cursor:not-allowed;';
+                    btn.textContent = '🚫 Blocked by Filter';
+                    var blockKey = _domPath(btn) + ':' + (btn.textContent || '').trim().toLowerCase().substring(0, 30);
+                    clickCooldowns[blockKey] = Date.now() + (15000 - COOLDOWN_MS);
+                    if (!window.__AA_DIAG) window.__AA_DIAG = [];
+                    window.__AA_DIAG.push({ action: 'BLOCKED', time: Date.now(), matched: matchedText, cmd: (cmdText || '').substring(0, 60) });
+                    continue; // Re-scan to find next button
                 }
             }
 
@@ -418,7 +562,7 @@ function buildDOMObserverScript(customTexts, blockedCommands, allowedCommands, a
                 } catch(e) {}
                 if (!window.__AA_DIAG) window.__AA_DIAG = [];
                 var diagCmdText = extractCommandText(btn);
-                window.__AA_DIAG.push({ action: 'CLICKED', time: Date.now(), matched: matchedText, cmd: diagCmdText ? diagCmdText.substring(0, 80) : 'NULL', url: (location.href || '').substring(0, 60), near: nearbyText.substring(0, 60) });
+                window.__AA_DIAG.push({ action: 'CLICKED', time: Date.now(), matched: matchedText, cmd: diagCmdText ? diagCmdText.substring(0, 80) : 'NULL', url: (window.location && window.location.href ? window.location.href : '').substring(0, 60), near: nearbyText.substring(0, 60) });
 
                 // ═══ RETRY CIRCUIT BREAKER ═══
                 // Prevents infinite loops when the model hits context limits or network

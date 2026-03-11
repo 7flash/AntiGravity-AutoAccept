@@ -33,6 +33,9 @@ class ConnectionManager {
         this.blockedCommands = [];
         this.allowedCommands = [];
         this.autoAcceptFileEdits = true;
+        this.autoContinuePhrase = 'whats next';
+        this.autoContinueCooldown = 30;
+        this.autoContinueMatch = [];
 
         // Lifecycle
         this.isRunning = false;
@@ -507,7 +510,10 @@ class ConnectionManager {
             this.getCustomTexts(),
             this.blockedCommands,
             this.allowedCommands,
-            this.autoAcceptFileEdits
+            this.autoAcceptFileEdits,
+            this.autoContinuePhrase,
+            this.autoContinueCooldown,
+            this.autoContinueMatch
         );
         try {
             // Force-clear stale observer flag from previous sessions.
@@ -727,6 +733,14 @@ class ConnectionManager {
                                 this.log(`[DIAG] [${shortId}] SKIP_COOLDOWN | matched=${d.matched} | remaining=${d.remaining || '?'}`);
                             } else if (d.action === 'CLICKED') {
                                 this.log(`[DIAG] [${shortId}] CLICKED | matched=${d.matched} | cmd=${d.cmd || 'N/A'} | url=${d.url || 'N/A'} | near=${(d.near || '').substring(0, 60)}`);
+                            } else if (d.action === 'SKIP_SHORT_RESPONSE') {
+                                this.log(`[DIAG] [${shortId}] SKIP | match=${d.matched} | limit=200 | chars=${d.len} — AI response too short`);
+                            } else if (d.action === 'AUTO_CONTINUE') {
+                                this.log(`[DIAG] [${shortId}] auto-continue: typed "${d.text}" and clicked send`);
+                            } else if (d.action === 'SKIP_LONG_TEXT') {
+                                this.log(`[DIAG] [${shortId}] SKIP | matched=${d.matched} | chars=${d.len} | preview=${d.preview}`);
+                            } else if (d.action === 'SKIP_EXPAND_TOGGLE') {
+                                this.log(`[DIAG] [${shortId}] SKIP | matched=${d.matched} | expand_toggle=${d.btnText}`);
                             } else {
                                 this.log(`[DIAG] [${shortId}] ${d.action} | ${JSON.stringify(d).substring(0, 100)}`);
                             }

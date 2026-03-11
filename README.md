@@ -1,5 +1,5 @@
 # AntiGravity AutoAccept
-<!-- v3.7.4 file edit auto-accept test -->
+<!-- v3.8.0 -->
 
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-yellow?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/yazanbaker)
 
@@ -144,6 +144,8 @@ To run multiple agents with auto-accept on all of them:
 | `autoAcceptV2.autoAcceptFileEdits` | `true` | window | Auto-accept file edit changes (disable to review diffs manually) |
 | `autoAcceptV2.blockedCommands` | `[]` | application | Commands to NEVER auto-run (e.g. `rm`, `git push`, `npm publish`) |
 | `autoAcceptV2.allowedCommands` | `[]` | application | If set, ONLY these commands will auto-run (whitelist mode) |
+| `autoAcceptV2.autoContinuePhrase` | `"whats next"` | window | Phrase to auto-type when the AI is idle. Empty string disables auto-continue |
+| `autoAcceptV2.autoContinueCooldown` | `30` | window | Seconds between auto-continue prompts (5–120) |
 
 > **Tip:** Settings are hot-reloaded — changes take effect immediately without restarting.
 
@@ -164,13 +166,23 @@ The CDP connection now validates existing sessions every heartbeat cycle (30s). 
 ### Expand Button Loop Prevention (v3.5.1)
 Expand-type buttons (e.g. browser preview "Expand") use a **click-once-per-session** rule: once clicked, they are permanently suppressed for that CDP session via an `expandedOnce` Set. This prevents the infinite overlay re-open loop where closing the expanded panel triggers a re-click. The state resets naturally when a new agent conversation starts.
 
+### Auto-Continue (v3.8.0)
+When the AI finishes responding and the chat input is empty, the extension automatically types a configurable phrase (default: `"whats next"`) and clicks send. This keeps the agent working autonomously without manual prompts.
+
+**Safeguards:**
+- **Cooldown** — configurable 5–120s delay between auto-continues (default 30s)
+- **Idle detection** — only fires when the send button is present (= AI is idle, not generating)
+- **Empty input guard** — won't overwrite if the user has typed something
+- **Response length check** — skips if the last AI response is under 200 chars (prevents loops on error messages)
+- **Disable** — set `autoContinuePhrase` to empty string to turn it off entirely
+
 ### Button Detection
-Inside the agent panel, a `TreeWalker` searches for buttons by text content using `startsWith` matching with **word-boundary checks** to prevent false positives (e.g. `accept-test.js` won't match `accept`):
+Inside the agent panel, a `TreeWalker` searches for buttons by text content using `startsWith` matching with **word-boundary checks** to prevent false positives (e.g. `accept-test.js` won't match `accept`). Also handles keyboard shortcut suffixes — `AcceptAlt+⏎` correctly matches `accept`.
 
 | Priority | Text | Matches |
 |---|---|---|
 | 1 | `run` | "Run Alt+d" button ✅ (not "Always run ^" dropdown) |
-| 2 | `accept` | Accept button |
+| 2 | `accept` | Accept button (disabled when `autoAcceptFileEdits` is false) |
 | 3 | `always allow` | Permission prompts |
 | 4 | `allow this conversation` | Conversation-scoped permissions |
 | 5 | `allow` | Permission prompts |
@@ -209,6 +221,16 @@ On activation, the extension checks if port 9333 is open (with 9222 fallback). I
 
 1. Run `Ctrl+Shift+P` → `Reload Window`
 2. Check that the VSIX was built **with** dependencies (the `ws` package must be included)
+
+## Testing
+
+```bash
+npm test                               # Runs all 3 suites (160 tests)
+node test/dom-observer.test.js         # 60 tests — DOMObserver script generation
+node test/connection-manager.test.js   # 34 tests — CDP target/session lifecycle
+node test/telemetry.test.js            # 66 tests — Telemetry aggregation
+node test/permission-engine.test.js    # Requires DOM environment (jsdom) — not in npm test
+```
 
 ---
 
