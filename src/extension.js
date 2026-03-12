@@ -51,16 +51,41 @@ let cachedBlockedCommands = [];
 let cachedAllowedCommands = [];
 let cachedHasFilters = false;
 
+function validateRegexPatterns(patterns, logFunc, configName) {
+    if (!patterns || !Array.isArray(patterns)) return [];
+    const valid = [];
+    for (const p of patterns) {
+        if (typeof p === 'string' && p.length > 2 && p.startsWith('/') && p.lastIndexOf('/') > 0) {
+            const body = p.substring(1, p.lastIndexOf('/'));
+            const flags = p.substring(p.lastIndexOf('/') + 1);
+            try {
+                new RegExp(body, flags);
+                valid.push(p);
+            } catch (e) {
+                const msg = `Invalid regex in ${configName}: ${p} - ${e.message}`;
+                if (logFunc) logFunc('[Config Warn] ' + msg);
+                vscode.window.showWarningMessage('AntiGravity AutoAccept: ' + msg);
+            }
+        } else {
+            valid.push(p);
+        }
+    }
+    return valid;
+}
+
 function refreshConfig() {
     const config = vscode.workspace.getConfiguration('autoAcceptV2');
     const newFileEdits = config.get('autoAcceptFileEdits', true);
-    const newBlocked = config.get('blockedCommands', []);
-    const newAllowed = config.get('allowedCommands', []);
+    let newBlocked = config.get('blockedCommands', []);
+    let newAllowed = config.get('allowedCommands', []);
+    newBlocked = validateRegexPatterns(newBlocked, log, 'blockedCommands');
+    newAllowed = validateRegexPatterns(newAllowed, log, 'allowedCommands');
     const newHasFilters = newBlocked.length > 0 || newAllowed.length > 0;
     const newContinuePhrase = config.get('autoContinuePhrase', 'whats next');
     const newContinueCooldown = config.get('autoContinueCooldown', 30);
     const newContinueMatch = config.get('autoContinueMatch', []);
     const newCustomTargetSelectors = config.get('customTargetSelectors', []);
+    const newCustomCSS = config.get('customCSS', '');
 
     // Log only on transitions
     if (newHasFilters !== cachedHasFilters) {
@@ -100,6 +125,10 @@ function refreshConfig() {
         }
         if (JSON.stringify(connectionManager.customTargetSelectors) !== JSON.stringify(newCustomTargetSelectors)) {
             connectionManager.customTargetSelectors = newCustomTargetSelectors;
+            needReinject = true;
+        }
+        if (connectionManager.customCSS !== newCustomCSS) {
+            connectionManager.customCSS = newCustomCSS;
             needReinject = true;
         }
         if (needReinject) {
@@ -393,7 +422,7 @@ function activate(context) {
     connectionManager = new ConnectionManager({
         log,
         getPort: getConfiguredPort,
-        getCustomTexts: () => vscode.workspace.getConfiguration('autoAcceptV2').get('customButtonTexts', [])
+        getCustomTexts: () => validateRegexPatterns(vscode.workspace.getConfiguration('autoAcceptV2').get('customButtonTexts', []), log, 'customButtonTexts')
     });
 
     // Refresh dashboard when CDP status changes (connect/disconnect)

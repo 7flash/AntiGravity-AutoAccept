@@ -13,7 +13,7 @@
  * @param {number} [autoContinueCooldown=30] - Seconds between auto-continue prompts
  * @returns {string} JavaScript source to evaluate via CDP Runtime.evaluate
  */
-function buildDOMObserverScript(customTexts, blockedCommands, allowedCommands, autoAcceptFileEdits, autoContinuePhrase, autoContinueCooldown, autoContinueMatch, customTargetSelectors) {
+function buildDOMObserverScript(customTexts, blockedCommands, allowedCommands, autoAcceptFileEdits, autoContinuePhrase, autoContinueCooldown, autoContinueMatch, customTargetSelectors, customCSS) {
     blockedCommands = blockedCommands || [];
     allowedCommands = allowedCommands || [];
     if (autoAcceptFileEdits === undefined) autoAcceptFileEdits = true;
@@ -58,6 +58,17 @@ function buildDOMObserverScript(customTexts, blockedCommands, allowedCommands, a
     var AUTO_CONTINUE_COOLDOWN_MS = ${autoContinueCooldown * 1000};
     var AUTO_CONTINUE_MATCH = ${JSON.stringify(autoContinueMatch || [])};
     var CUSTOM_TARGET_SELECTORS = ${JSON.stringify(customTargetSelectors || [])};
+
+    var CUSTOM_CSS = ${JSON.stringify(customCSS || '')};
+    if (CUSTOM_CSS) {
+        var styleEl = document.getElementById('aa-custom-css');
+        if (!styleEl) {
+            styleEl = document.createElement('style');
+            styleEl.id = 'aa-custom-css';
+            document.head.appendChild(styleEl);
+        }
+        styleEl.textContent = CUSTOM_CSS;
+    }
 
     // ═══ IDEMPOTENT TEARDOWN ═══
     // Clean up any previous state (observer, intervals) to prevent leaks on re-injection.

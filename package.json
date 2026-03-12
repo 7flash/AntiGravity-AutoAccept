@@ -60,6 +60,12 @@
                     "scope": "application",
                     "description": "Extra CSS selectors for buttons to auto-click. Adapts the extension to different IDEs or AI assistants."
                 },
+                "autoAcceptV2.customCSS": {
+                    "type": "string",
+                    "default": "",
+                    "scope": "window",
+                    "description": "Custom CSS to inject into the webview/IDE panel. Use this to style elements or hide visual clutter."
+                },
                 "autoAcceptV2.cdpPort": {
                     "type": "number",
                     "default": 9333,

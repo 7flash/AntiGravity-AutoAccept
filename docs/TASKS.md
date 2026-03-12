@@ -12,12 +12,12 @@
 
 ## 🟢 Priority: Features
 - [x] ~~**Configurable IDE target selectors**~~ — ✅ DONE. `customTargetSelectors` property added to config. Injects via CDP, parsed dynamically at priority -1 during `findButton` to shortcut tree walker. Adapts to UI changes without recoding.
-- [ ] **Custom CSS Injector** — Allow users to inject a custom CSS string into the webview/IDE panel to style or hide elements.
+- [x] ~~**Custom CSS Injector**~~ — ✅ DONE. `customCSS` property added. Observer creates an `<style id="aa-custom-css">` element and drops in stringified CSS directly inside the target webview.
 - [x] ~~**Blocklist Regex Support**~~ — ✅ DONE. Added Regex support to `matchesPattern` (e.g., `/DROP.*/i`). Uses `.test(cmd)`. 6 new tests added to permission-engine.test.js.
+- [x] ~~**Config validation for regex patterns**~~ — ✅ DONE. `validateRegexPatterns` added to filter invalid regex strings (`/pattern/`) and show VS Code warnings on load, preventing broken MutationObservers.
 - [x] ~~**DOMObserver unit tests**~~ — ✅ DONE. 60 tests.
 - [x] ~~**Permission engine test coverage**~~ — ✅ DONE. 93 tests covering matchesPattern word-boundary matching and new regex support.
 - [x] ~~**E2E smoke test**~~ — ✅ DONE. CDP-based test that attaches to running Antigravity (or launches isolated instance), injects DOMObserver via `buildDOMObserverScript()`, verifies observer state (active, not paused, cleanup, idempotent re-injection). 13 tests. Supports `--attach <port>` mode.
-- [ ] **Config validation for regex patterns** — Validate that any `/pattern/` strings in config are valid regular expressions before sending them to the observer.
 
 ## 📝 Architecture Notes
 - **Extension**: VS Code extension (`src/extension.js`) → activates on startup

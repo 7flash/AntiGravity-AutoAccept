@@ -37,6 +37,7 @@ class ConnectionManager {
         this.autoContinueCooldown = 30;
         this.autoContinueMatch = [];
         this.customTargetSelectors = [];
+        this.customCSS = '';
 
         // Lifecycle
         this.isRunning = false;
@@ -515,7 +516,8 @@ class ConnectionManager {
             this.autoContinuePhrase,
             this.autoContinueCooldown,
             this.autoContinueMatch,
-            this.customTargetSelectors
+            this.customTargetSelectors,
+            this.customCSS
         );
         try {
             // Force-clear stale observer flag from previous sessions.
