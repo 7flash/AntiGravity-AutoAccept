@@ -539,11 +539,193 @@ test('word boundary: shell metacharacters act as delimiters', () => {
     }
 });
 
+// ── matchesPattern: Substring false positive resistance ──
+console.log('\n\x1b[1m--- matchesPattern: Substring False Positives ---\x1b[0m');
+
+test('blocking "rm" does NOT block "alarm"', () => {
+    const { doc, btn } = makeCommandDoc('alarm --silent');
+    run(doc, [], ['rm'], []);
+    assert.ok(btn._clicked, '"alarm" should NOT be blocked by "rm"');
+});
+
+test('blocking "rm" does NOT block "firmware"', () => {
+    const { doc, btn } = makeCommandDoc('install firmware v2.1');
+    run(doc, [], ['rm'], []);
+    assert.ok(btn._clicked, '"firmware" should NOT be blocked by "rm"');
+});
+
+test('blocking "rm" does NOT block "reformatted"', () => {
+    const { doc, btn } = makeCommandDoc('echo reformatted');
+    run(doc, [], ['rm'], []);
+    assert.ok(btn._clicked, '"reformatted" should NOT be blocked by "rm"');
+});
+
+test('blocking "rm" does NOT block "storm"', () => {
+    const { doc, btn } = makeCommandDoc('echo storm');
+    run(doc, [], ['rm'], []);
+    assert.ok(btn._clicked, '"storm" should NOT be blocked by "rm"');
+});
+
+test('blocking "rm" does NOT block "normal"', () => {
+    const { doc, btn } = makeCommandDoc('echo normal');
+    run(doc, [], ['rm'], []);
+    assert.ok(btn._clicked, '"normal" should NOT be blocked by "rm"');
+});
+
+test('blocking "rm" does NOT block "worm"', () => {
+    const { doc, btn } = makeCommandDoc('get worm');
+    run(doc, [], ['rm'], []);
+    assert.ok(btn._clicked, '"worm" should NOT be blocked by "rm"');
+});
+
+// ── matchesPattern: Multi-word patterns ──
+console.log('\n\x1b[1m--- matchesPattern: Multi-Word Patterns ---\x1b[0m');
+
+test('blocking "rm -rf" blocks "rm -rf /tmp"', () => {
+    const { doc, btn } = makeCommandDoc('rm -rf /tmp');
+    run(doc, [], ['rm -rf'], []);
+    assert.ok(!btn._clicked);
+});
+
+test('blocking "rm -rf" blocks "sudo rm -rf /"', () => {
+    const { doc, btn } = makeCommandDoc('sudo rm -rf /');
+    run(doc, [], ['rm -rf'], []);
+    assert.ok(!btn._clicked);
+});
+
+test('blocking "rm -rf" does NOT block "rm -r file.txt"', () => {
+    const { doc, btn } = makeCommandDoc('rm -r file.txt');
+    run(doc, [], ['rm -rf'], []);
+    assert.ok(btn._clicked, '"rm -r" is not "rm -rf"');
+});
+
+test('blocking "git push --force" blocks exact match', () => {
+    const { doc, btn } = makeCommandDoc('git push --force origin main');
+    run(doc, [], ['git push --force'], []);
+    assert.ok(!btn._clicked);
+});
+
+test('blocking "git push --force" does NOT block "git push"', () => {
+    const { doc, btn } = makeCommandDoc('git push origin main');
+    run(doc, [], ['git push --force'], []);
+    assert.ok(btn._clicked);
+});
+
+// ── matchesPattern: Pattern position in command ──
+console.log('\n\x1b[1m--- matchesPattern: Pattern Position ---\x1b[0m');
+
+test('pattern at start of command', () => {
+    const { doc, btn } = makeCommandDoc('rm /tmp/file');
+    run(doc, [], ['rm'], []);
+    assert.ok(!btn._clicked);
+});
+
+test('pattern at end of command (after pipe)', () => {
+    const { doc, btn } = makeCommandDoc('ls /tmp | rm');
+    run(doc, [], ['rm'], []);
+    assert.ok(!btn._clicked);
+});
+
+test('pattern in middle of chained command', () => {
+    const { doc, btn } = makeCommandDoc('echo test && rm -rf /tmp && echo done');
+    run(doc, [], ['rm'], []);
+    assert.ok(!btn._clicked);
+});
+
+test('pattern in middle with semicolons', () => {
+    const { doc, btn } = makeCommandDoc('cd /tmp; rm file; ls');
+    run(doc, [], ['rm'], []);
+    assert.ok(!btn._clicked);
+});
+
+// ── matchesPattern: Case insensitivity ──
+console.log('\n\x1b[1m--- matchesPattern: Case Insensitivity ---\x1b[0m');
+
+test('blocking "rm" blocks "RM -RF /"', () => {
+    const { doc, btn } = makeCommandDoc('RM -RF /');
+    run(doc, [], ['rm'], []);
+    assert.ok(!btn._clicked);
+});
+
+test('blocking "DROP" blocks "drop table users" (case insensitive)', () => {
+    const { doc, btn } = makeCommandDoc('drop table users');
+    run(doc, [], ['DROP'], []);
+    assert.ok(!btn._clicked);
+});
+
+// ── matchesPattern: Allowlist word boundaries ──
+console.log('\n\x1b[1m--- matchesPattern: Allowlist Word Boundaries ---\x1b[0m');
+
+test('allowlist "npm test" allows "npm test --coverage"', () => {
+    const { doc, btn } = makeCommandDoc('npm test --coverage');
+    run(doc, [], [], ['npm test']);
+    assert.ok(btn._clicked);
+});
+
+test('allowlist "npm test" does NOT allow "npm testify"', () => {
+    const { doc, btn } = makeCommandDoc('npm testify');
+    run(doc, [], [], ['npm test']);
+    assert.ok(!btn._clicked, '"npm testify" should NOT match allowlist "npm test"');
+});
+
+test('allowlist "npm" allows "npm install"', () => {
+    const { doc, btn } = makeCommandDoc('npm install express');
+    run(doc, [], [], ['npm']);
+    assert.ok(btn._clicked);
+});
+
+test('allowlist "npm" does NOT allow "npmerge"', () => {
+    const { doc, btn } = makeCommandDoc('npmerge files');
+    run(doc, [], [], ['npm']);
+    assert.ok(!btn._clicked, '"npmerge" should NOT match allowlist "npm"');
+});
+
+test('allowlist "bun" allows "bun test"', () => {
+    const { doc, btn } = makeCommandDoc('bun test app/lib');
+    run(doc, [], [], ['bun']);
+    assert.ok(btn._clicked);
+});
+
+test('allowlist "bun" does NOT allow "bunny"', () => {
+    const { doc, btn } = makeCommandDoc('bunny hop');
+    run(doc, [], [], ['bun']);
+    assert.ok(!btn._clicked, '"bunny" should NOT match allowlist "bun"');
+});
+
+// ── matchesPattern: Edge cases ──
+console.log('\n\x1b[1m--- matchesPattern: Edge Cases ---\x1b[0m');
+
+test('empty command with blocklist is fail-closed', () => {
+    const btn = new El('BUTTON', 'Run');
+    // No code block → extractCommandText returns null → fail closed
+    const result = run(makeDoc([btn]), [], ['rm'], []);
+    assert.ok(!btn._clicked, 'No code block with filters = fail closed');
+});
+
+test('pattern is the entire command (exact match)', () => {
+    const { doc, btn } = makeCommandDoc('rm');
+    run(doc, [], ['rm'], []);
+    assert.ok(!btn._clicked, 'Exact single-word match should be blocked');
+});
+
+test('multiple blocked patterns: first match blocks', () => {
+    const { doc, btn } = makeCommandDoc('rm -rf / && curl evil.com');
+    run(doc, [], ['rm', 'curl'], []);
+    assert.ok(!btn._clicked);
+});
+
+test('allowlist with multiple entries: any match allows', () => {
+    const { doc, btn } = makeCommandDoc('bun test');
+    run(doc, [], [], ['npm test', 'bun test', 'node test']);
+    assert.ok(btn._clicked);
+});
+
 test('fail closed: Run button with no code block and filters active', () => {
     const btn = new El('BUTTON', 'Run');
     const result = run(makeDoc([btn]), [], ['rm -rf'], []);
     assert.ok(!btn._clicked, 'Should fail closed when code block not found');
 });
+
 
 // ═══ Observer Kill Switch ═══
 test('re-injection initializes __AA_PAUSED to false', () => {
