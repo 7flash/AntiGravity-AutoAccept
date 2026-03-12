@@ -1,5 +1,5 @@
 # AntiGravity AutoAccept
-<!-- v3.8.0 -->
+<!-- v5.0.0 -->
 
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-yellow?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/yazanbaker)
 
@@ -166,14 +166,17 @@ The CDP connection now validates existing sessions every heartbeat cycle (30s). 
 ### Expand Button Loop Prevention (v3.5.1)
 Expand-type buttons (e.g. browser preview "Expand") use a **click-once-per-session** rule: once clicked, they are permanently suppressed for that CDP session via an `expandedOnce` Set. This prevents the infinite overlay re-open loop where closing the expanded panel triggers a re-click. The state resets naturally when a new agent conversation starts.
 
-### Auto-Continue (v3.8.0)
+### Auto-Continue (v5.0.0)
 When the AI finishes responding and the chat input is empty, the extension automatically types a configurable phrase (default: `"whats next"`) and clicks send. This keeps the agent working autonomously without manual prompts.
+
+In v5.0.0, Auto-Continue is **integrated directly into the DOMObserver lifecycle** — it runs as part of the same MutationObserver that handles button clicks, eliminating race conditions between the polling loop and DOM observation.
 
 **Safeguards:**
 - **Cooldown** — configurable 5–120s delay between auto-continues (default 30s)
 - **Idle detection** — only fires when the send button is present (= AI is idle, not generating)
 - **Empty input guard** — won't overwrite if the user has typed something
 - **Response length check** — skips if the last AI response is under 200 chars (prevents loops on error messages)
+- **Stall detection** — detects when the agent gets stuck and auto-retries
 - **Disable** — set `autoContinuePhrase` to empty string to turn it off entirely
 
 ### Button Detection
@@ -225,11 +228,12 @@ On activation, the extension checks if port 9333 is open (with 9222 fallback). I
 ## Testing
 
 ```bash
-npm test                               # Runs all 3 suites (160 tests)
+npm test                               # Runs all 5 suites (267 tests)
 node test/dom-observer.test.js         # 60 tests — DOMObserver script generation
 node test/connection-manager.test.js   # 34 tests — CDP target/session lifecycle
 node test/telemetry.test.js            # 66 tests — Telemetry aggregation
-node test/permission-engine.test.js    # Requires DOM environment (jsdom) — not in npm test
+node test/permission-engine.test.js    # 94 tests — Command filtering, word-boundary matching
+node test/e2e-smoke.test.js            # 13 tests — End-to-end smoke tests
 ```
 
 ---
