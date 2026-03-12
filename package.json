@@ -51,6 +51,15 @@
                     "scope": "application",
                     "description": "Extra button texts to auto-click. Supports exact strings or Regex patterns enclosed in forward slashes. E.g. ['toujours autoriser', '/^deploy.*$/']"
                 },
+                "autoAcceptV2.customTargetSelectors": {
+                    "type": "array",
+                    "default": [],
+                    "items": {
+                        "type": "string"
+                    },
+                    "scope": "application",
+                    "description": "Extra CSS selectors for buttons to auto-click. Adapts the extension to different IDEs or AI assistants."
+                },
                 "autoAcceptV2.cdpPort": {
                     "type": "number",
                     "default": 9333,

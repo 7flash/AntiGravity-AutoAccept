@@ -60,6 +60,7 @@ function refreshConfig() {
     const newContinuePhrase = config.get('autoContinuePhrase', 'whats next');
     const newContinueCooldown = config.get('autoContinueCooldown', 30);
     const newContinueMatch = config.get('autoContinueMatch', []);
+    const newCustomTargetSelectors = config.get('customTargetSelectors', []);
 
     // Log only on transitions
     if (newHasFilters !== cachedHasFilters) {
@@ -97,6 +98,10 @@ function refreshConfig() {
             connectionManager.autoContinueMatch = newContinueMatch;
             needReinject = true;
         }
+        if (JSON.stringify(connectionManager.customTargetSelectors) !== JSON.stringify(newCustomTargetSelectors)) {
+            connectionManager.customTargetSelectors = newCustomTargetSelectors;
+            needReinject = true;
+        }
         if (needReinject) {
             connectionManager.reinjectAll();
         }
@@ -130,6 +135,7 @@ let statusBarItem = null;
 let outputChannel = null;
 let connectionManager = null;
 let dashboardProvider = null;
+let extensionContext = null;
 
 function log(msg) {
     if (outputChannel) {
@@ -149,12 +155,15 @@ function log(msg) {
 
 function updateStatusBar() {
     if (!statusBarItem) return;
+
+    const clicks = extensionContext ? extensionContext.globalState.get('autoAcceptTotalClicks', 0) : 0;
+
     if (isEnabled) {
-        statusBarItem.text = '$(zap) Auto: ON';
+        statusBarItem.text = `$(zap) Auto: ON (${clicks}x)`;
         statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
         statusBarItem.tooltip = 'AntiGravity AutoAccept is ACTIVE — click to disable';
     } else {
-        statusBarItem.text = '$(circle-slash) Auto: OFF';
+        statusBarItem.text = `$(circle-slash) Auto: OFF (${clicks}x)`;
         statusBarItem.backgroundColor = undefined;
         statusBarItem.tooltip = 'AntiGravity AutoAccept is OFF — click to enable';
     }
@@ -376,6 +385,7 @@ else { Write-Output "NOT_FOUND" }
 
 // ─── Activation ───────────────────────────────────────────────────────
 function activate(context) {
+    extensionContext = context;
     outputChannel = vscode.window.createOutputChannel('AntiGravity AutoAccept');
     log('Extension activating (v3.0.0)');
 
@@ -445,6 +455,7 @@ function activate(context) {
                 break;
             }
         }
+        updateStatusBar();
     };
 
     // Cross-machine sync: persist analytics across VS Code environments

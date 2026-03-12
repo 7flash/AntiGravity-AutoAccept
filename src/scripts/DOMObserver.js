@@ -13,7 +13,7 @@
  * @param {number} [autoContinueCooldown=30] - Seconds between auto-continue prompts
  * @returns {string} JavaScript source to evaluate via CDP Runtime.evaluate
  */
-function buildDOMObserverScript(customTexts, blockedCommands, allowedCommands, autoAcceptFileEdits, autoContinuePhrase, autoContinueCooldown, autoContinueMatch) {
+function buildDOMObserverScript(customTexts, blockedCommands, allowedCommands, autoAcceptFileEdits, autoContinuePhrase, autoContinueCooldown, autoContinueMatch, customTargetSelectors) {
     blockedCommands = blockedCommands || [];
     allowedCommands = allowedCommands || [];
     if (autoAcceptFileEdits === undefined) autoAcceptFileEdits = true;
@@ -57,6 +57,7 @@ function buildDOMObserverScript(customTexts, blockedCommands, allowedCommands, a
     var AUTO_CONTINUE_PHRASE = ${JSON.stringify(autoContinuePhrase)};
     var AUTO_CONTINUE_COOLDOWN_MS = ${autoContinueCooldown * 1000};
     var AUTO_CONTINUE_MATCH = ${JSON.stringify(autoContinueMatch || [])};
+    var CUSTOM_TARGET_SELECTORS = ${JSON.stringify(customTargetSelectors || [])};
 
     // ═══ IDEMPOTENT TEARDOWN ═══
     // Clean up any previous state (observer, intervals) to prevent leaks on re-injection.
@@ -188,32 +189,50 @@ function buildDOMObserverScript(customTexts, blockedCommands, allowedCommands, a
                 continue;
             }
 
-            // Check this node against ALL keywords in a single iteration
-            for (var t = 0; t < texts.length; t++) {
-                // Skip keywords lower priority than current best
-                if (best !== null && t >= best.priority) break;
-                var text = texts[t];
-                // Expand keywords: exact match ONLY to prevent toggle loops
-                // ('Expand all' → click → 'Collapse all' → mutation → 'Expand all' → click → ∞)
-                var isExpandKeyword = (text === 'expand' || text === 'requires input');
-                var isMatch;
-                if (isExpandKeyword) {
-                    isMatch = nodeText === text;
-                } else if (text.length > 2 && text.charAt(0) === '/' && text.charAt(text.length - 1) === '/') {
-                    try {
-                        var regex = new RegExp(text.substring(1, text.length - 1), 'i');
-                        isMatch = regex.test(nodeText);
-                    } catch (e) {
-                        isMatch = false;
+            // Check this node against custom selectors (highest priority t=-1) and ALL keywords
+            var matchedSelector = null;
+            if (CUSTOM_TARGET_SELECTORS.length > 0 && wNode.matches) {
+                for (var s = 0; s < CUSTOM_TARGET_SELECTORS.length; s++) {
+                    if (wNode.matches(CUSTOM_TARGET_SELECTORS[s])) {
+                        matchedSelector = 'selector:' + CUSTOM_TARGET_SELECTORS[s];
+                        break;
                     }
+                }
+            }
+
+            for (var t = -1; t < texts.length; t++) {
+                // Skip keywords lower priority than current best (Math.max handles -1 mapping properly)
+                if (best !== null && Math.max(0, t) >= best.priority) break;
+                
+                var text, isExpandKeyword, isMatch;
+                if (t === -1) {
+                    if (!matchedSelector) continue;
+                    text = matchedSelector;
+                    isExpandKeyword = false;
+                    isMatch = true;
                 } else {
-                    isMatch = nodeText === text ||
-                        (text.length >= 5 && nodeText.startsWith(text) && isWordBoundary(nodeText, text.length) && nodeText.length <= text.length * 3) ||
-                        (nodeText.startsWith(text + ' ') && nodeText.length <= text.length * 5) ||
-                        // Keyboard shortcut suffix: Antigravity renders "AcceptAlt+⏎" with no space.
-                        // The word boundary check fails because 'a' (from 'alt') is a word char.
-                        (text.length >= 5 && nodeText.startsWith(text) && nodeText.length <= text.length * 5 &&
-                            /^(alt|ctrl|shift|cmd|meta|⌘|⌥|⇧|⌃)/.test(nodeText.substring(text.length)));
+                    text = texts[t];
+                    // Expand keywords: exact match ONLY to prevent toggle loops
+                    // ('Expand all' → click → 'Collapse all' → mutation → 'Expand all' → click → ∞)
+                    isExpandKeyword = (text === 'expand' || text === 'requires input');
+                    if (isExpandKeyword) {
+                        isMatch = nodeText === text;
+                    } else if (text.length > 2 && text.charAt(0) === '/' && text.charAt(text.length - 1) === '/') {
+                        try {
+                            var regex = new RegExp(text.substring(1, text.length - 1), 'i');
+                            isMatch = regex.test(nodeText);
+                        } catch (e) {
+                            isMatch = false;
+                        }
+                    } else {
+                        isMatch = nodeText === text ||
+                            (text.length >= 5 && nodeText.startsWith(text) && isWordBoundary(nodeText, text.length) && nodeText.length <= text.length * 3) ||
+                            (nodeText.startsWith(text + ' ') && nodeText.length <= text.length * 5) ||
+                            // Keyboard shortcut suffix: Antigravity renders "AcceptAlt+⏎" with no space.
+                            // The word boundary check fails because 'a' (from 'alt') is a word char.
+                            (text.length >= 5 && nodeText.startsWith(text) && nodeText.length <= text.length * 5 &&
+                                /^(alt|ctrl|shift|cmd|meta|⌘|⌥|⇧|⌃)/.test(nodeText.substring(text.length)));
+                    }
                 }
                 if (!isMatch) continue;
 
@@ -266,7 +285,7 @@ function buildDOMObserverScript(customTexts, blockedCommands, allowedCommands, a
                         continue;
                     }
                     best = { node: clickable, matchedText: text, priority: t };
-                    if (t === 0) return best; // Priority 0 — can't do better
+                    if (t === -1 || t === 0) return best; // Priority -1 or 0 — can't do better
                     break; // Found match for this node, move to next node
                 }
             }
@@ -345,6 +364,20 @@ function buildDOMObserverScript(customTexts, blockedCommands, allowedCommands, a
         // sequence in the command. Uses shell metacharacters as boundaries to prevent
         // 'rm' from matching 'format' or 'npm run build-arm'.
         function matchesPattern(cmd, pattern) {
+            if (pattern.length > 2 && pattern.charAt(0) === '/') {
+                var lastSlash = pattern.lastIndexOf('/');
+                if (lastSlash > 0) {
+                    try {
+                        var body = pattern.substring(1, lastSlash);
+                        var flags = pattern.substring(lastSlash + 1);
+                        var regex = new RegExp(body, flags);
+                        return regex.test(cmd);
+                    } catch (e) {
+                        // Fallback to literal match if invalid regex
+                    }
+                }
+            }
+
             var patLower = pattern.toLowerCase();
             var cmdLower = cmd.toLowerCase();
             // Multi-word patterns (e.g. 'rm -rf', 'git push --force'):
@@ -619,8 +652,31 @@ function buildDOMObserverScript(customTexts, blockedCommands, allowedCommands, a
         // (React mounts button → then streams LLM text). A trailing debounce
         // would delay clicks until streaming stops, which is the wrong behavior.
         var __AA_SCAN_QUEUED = false;
-        var observer = new MutationObserver(function() {
+        var __AA_THROTTLE_COUNT = 0;
+        var __AA_THROTTLE_LAST_RESET = Date.now();
+
+        var observer = new MutationObserver(function(mutations) {
             if (__AA_SCAN_QUEUED || window.__AA_PAUSED) return;
+
+            // ═══ MEGA-DIFF THROTTLING ═══
+            // Prevent IDE lag when 1000s of lines are inserted into the DOM.
+            // If we see >50 mutations per second, we skip the synchronous tree walk
+            // and let the 10s fallback interval (or next second) catch the buttons.
+            var now = Date.now();
+            if (now - __AA_THROTTLE_LAST_RESET > 1000) {
+                __AA_THROTTLE_COUNT = 0;
+                __AA_THROTTLE_LAST_RESET = now;
+            }
+            __AA_THROTTLE_COUNT += mutations.length;
+            if (__AA_THROTTLE_COUNT > 50) {
+                if (!window.__AA_DIAG) window.__AA_DIAG = [];
+                // Only log once per 1-second window to prevent diagnostic array spam
+                if (__AA_THROTTLE_COUNT - mutations.length <= 50) { 
+                    window.__AA_DIAG.push({ action: 'THROTTLED', count: __AA_THROTTLE_COUNT, time: now });
+                }
+                return;
+            }
+
             __AA_SCAN_QUEUED = true;
             // 50ms time-based debounce — survives background window throttling
             // (rAF freezes when window is hidden/minimized, deadlocking the observer).

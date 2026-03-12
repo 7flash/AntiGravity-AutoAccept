@@ -692,6 +692,46 @@ test('allowlist "bun" does NOT allow "bunny"', () => {
     assert.ok(!btn._clicked, '"bunny" should NOT match allowlist "bun"');
 });
 
+// ── matchesPattern: Regex Support ──
+console.log('\n\x1b[1m--- matchesPattern: Regex Support ---\x1b[0m');
+
+test('regex blocklist: /rm -rf.*/ blocks "rm -rf /"', () => {
+    const { doc, btn } = makeCommandDoc('rm -rf /');
+    run(doc, [], ['/rm -rf.*/'], []);
+    assert.ok(!btn._clicked, 'Regex should block');
+});
+
+test('regex blocklist: /rm -rf.*/ blocks "rm -rf /var/log"', () => {
+    const { doc, btn } = makeCommandDoc('rm -rf /var/log');
+    run(doc, [], ['/rm -rf.*/'], []);
+    assert.ok(!btn._clicked, 'Regex should block');
+});
+
+test('regex blocklist ignores case with i flag: /DROP.*/i', () => {
+    const { doc, btn } = makeCommandDoc('Drop Table users');
+    run(doc, [], ['/DROP.*/i'], []);
+    assert.ok(!btn._clicked, 'Regex should be case-insensitive with i flag');
+});
+
+test('regex allowlist allows match: /^npm test/ allows "npm test"', () => {
+    const { doc, btn } = makeCommandDoc('npm test');
+    run(doc, [], [], ['/^npm test/']);
+    assert.ok(btn._clicked, 'Regex allowlist should match');
+});
+
+test('regex allowlist anchors correctly: /^npm test/ does NOT allow "bun run npm test"', () => {
+    const { doc, btn } = makeCommandDoc('bun run npm test');
+    run(doc, [], [], ['/^npm test/']);
+    assert.ok(!btn._clicked, 'Anchored regex should not match inside string');
+});
+
+test('invalid regex falls back to literal match', () => {
+    const { doc, btn } = makeCommandDoc('/invalid[regex/');
+    // If it falls back to literal match, it will match exactly the text
+    run(doc, [], ['/invalid[regex/'], []);
+    assert.ok(!btn._clicked, 'Invalid regex falls back to string match');
+});
+
 // ── matchesPattern: Edge cases ──
 console.log('\n\x1b[1m--- matchesPattern: Edge Cases ---\x1b[0m');
 
